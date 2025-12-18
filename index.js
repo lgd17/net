@@ -1,9 +1,6 @@
 const schedule = require('node-schedule');
 require("./pingCron");
-require("./autoSend");
 require("./autoSender");
-require('./cleanLogs');
-require("./cleanOldCoupons");
 const { app, bot } = require("./server");
 const { ping } = require("./pingServer");
 const dayjs = require('dayjs');

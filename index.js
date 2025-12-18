@@ -6,6 +6,7 @@ const { ping } = require("./pingServer");
 const dayjs = require('dayjs');
 const customParse = require('dayjs/plugin/customParseFormat');
 dayjs.extend(customParse);
+const { pool } = require('./db');
 
 
 

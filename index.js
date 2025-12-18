@@ -7,7 +7,10 @@ require("./cleanOldCoupons");
 const { app, bot } = require("./server");
 const { ping } = require("./pingServer");
 
+// ====== CONFIGURATION ENV ======
+const PORT = process.env.PORT || 3000;
 const ADMIN_ID = Number(process.env.ADMIN_ID);
+
 
 bot.onText(/\/addfilmchannel (.+)/, async (msg, match) => {
   const userId = msg.from.id;

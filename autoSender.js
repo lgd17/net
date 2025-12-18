@@ -1,7 +1,7 @@
+// autoSend.js
 require('dotenv').config();
-const { Pool } = require('pg');
+const { pool } = require('./db'); // <- Assure-toi que le chemin est correct
 const bot = require('./bot');
-
 
 /* ================= 🎬 FILMS ================= */
 

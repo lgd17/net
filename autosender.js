@@ -2,67 +2,131 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const bot = require('./bot');
 
-const CANAL_ID = process.env.CANAL_ID;
 
-// 📤 Envoi du contenu
-async function sendContent(row) {
-  try {
-    if (row.type === 'text') {
-      await bot.sendMessage(CANAL_ID, row.content, {
-        parse_mode: 'HTML'
-      });
-    }
+/* ================= 🎬 FILMS ================= */
 
-    if (row.type === 'photo' || row.type === 'video') {
-      const { data, error } = await supabase.storage
-        .from('media')
-        .createSignedUrl(row.file_path, 300);
+async function getFilmChannels() {
+  const res = await pool.query(
+    'SELECT channel_id FROM channels_films WHERE active = true'
+  );
+  return res.rows.map(r => r.channel_id);
+}
 
-      if (error) throw error;
+async function sendFilmToChannels(row) {
+  const channels = await getFilmChannels();
+  if (!channels.length) return;
 
-      if (row.type === 'photo') {
-        await bot.sendPhoto(CANAL_ID, data.signedUrl, {
-          caption: row.caption || ''
-        });
+  for (const channelId of channels) {
+    try {
+      if (row.type === 'text') {
+        await bot.sendMessage(channelId, row.content);
       }
 
       if (row.type === 'video') {
-        await bot.sendVideo(CANAL_ID, data.signedUrl, {
+        const { data } = await supabase.storage
+          .from('media')
+          .createSignedUrl(row.file_path, 300);
+
+        await bot.sendVideo(channelId, data.signedUrl, {
           caption: row.caption || '',
           supports_streaming: true
         });
       }
+
+      console.log(`🎬 Film envoyé → ${channelId}`);
+    } catch (err) {
+      console.error(`❌ Film error (${channelId})`, err.message);
     }
+  }
 
-    // ✅ Marquer comme envoyé
-    await pool.query(
-      'UPDATE scheduled_messages SET sent = true WHERE id = $1',
-      [row.id]
-    );
+  await pool.query(
+    'UPDATE scheduled_films SET sent = true WHERE id = $1',
+    [row.id]
+  );
+}
 
-    console.log(`✅ Envoyé: ${row.type} (ID ${row.id})`);
-  } catch (err) {
-    console.error(`❌ Erreur ID ${row.id}:`, err.message);
+async function autoSendFilms() {
+  const res = await pool.query(
+    `SELECT * FROM scheduled_films
+     WHERE sent = false AND scheduled_at <= now()
+     ORDER BY scheduled_at ASC`
+  );
+
+  for (const row of res.rows) {
+    await sendFilmToChannels(row);
   }
 }
 
-// ⏰ Vérification toutes les 30 secondes
-async function autoSend() {
+/* ================= 📚 MANGAS ================= */
+
+async function getMangaChannels() {
+  const res = await pool.query(
+    'SELECT channel_id FROM channels_mangas WHERE active = true'
+  );
+  return res.rows.map(r => r.channel_id);
+}
+
+async function sendMangaToChannels(row) {
+  const channels = await getMangaChannels();
+  if (!channels.length) return;
+
+  for (const channelId of channels) {
+    try {
+      if (row.type === 'text') {
+        await bot.sendMessage(channelId, row.content);
+      }
+
+      if (row.type === 'photo' || row.type === 'video') {
+        const { data } = await supabase.storage
+          .from('media')
+          .createSignedUrl(row.file_path, 300);
+
+        if (row.type === 'photo') {
+          await bot.sendPhoto(channelId, data.signedUrl, {
+            caption: row.caption || ''
+          });
+        }
+
+        if (row.type === 'video') {
+          await bot.sendVideo(channelId, data.signedUrl, {
+            caption: row.caption || ''
+          });
+        }
+      }
+
+      console.log(`📚 Manga envoyé → ${channelId}`);
+    } catch (err) {
+      console.error(`❌ Manga error (${channelId})`, err.message);
+    }
+  }
+
+  await pool.query(
+    'UPDATE scheduled_mangas SET sent = true WHERE id = $1',
+    [row.id]
+  );
+}
+
+async function autoSendMangas() {
+  const res = await pool.query(
+    `SELECT * FROM scheduled_mangas
+     WHERE sent = false AND scheduled_at <= now()
+     ORDER BY scheduled_at ASC`
+  );
+
+  for (const row of res.rows) {
+    await sendMangaToChannels(row);
+  }
+}
+
+/* ================= ⏰ LOOP GLOBAL ================= */
+
+setInterval(async () => {
   try {
-    const res = await pool.query(
-      `SELECT * FROM scheduled_messages
-       WHERE sent = false AND scheduled_at <= now()
-       ORDER BY scheduled_at ASC`
-    );
-
-    for (const row of res.rows) {
-      await sendContent(row);
-    }
+    await autoSendFilms();
+    await autoSendMangas();
   } catch (err) {
-    console.error('❌ autoSend error:', err.message);
+    console.error('❌ AutoSender global error:', err.message);
   }
-}
+}, 30 * 1000);
 
-setInterval(autoSend, 30 * 1000);
-
-console.log('🤖 AutoSender lancé pour un seul canal');
+console.log('🤖 AutoSender lancé (Films + Mangas dynamiques)');

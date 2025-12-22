@@ -1,16 +1,31 @@
 // autoSend.js
 require('dotenv').config();
-const { pool } = require('./db'); 
+const { pool } = require('./db');
 const bot = require('./bot');
-const supabase = require('./supabase'); 
+const supabase = require('./supabase');
 
+// ================= CONFIG =================
 
-/* ================= 🎬 FILMS ================= */
+// Si ton bucket Supabase est public, active cette option
+const USE_PUBLIC_BUCKET = true;
 
+// ================= HELPERS =================
+async function getSignedUrl(filePath) {
+  if (USE_PUBLIC_BUCKET) {
+    const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+    return data?.publicUrl || null;
+  } else {
+    const { data, error } = await supabase.storage
+      .from('media')
+      .createSignedUrl(filePath, 3600);
+    if (error || !data) return null;
+    return data.signedUrl;
+  }
+}
+
+// ================= 🎬 FILMS =================
 async function getFilmChannels() {
-  const res = await pool.query(
-    'SELECT channel_id FROM channels_films WHERE active = true'
-  );
+  const res = await pool.query('SELECT channel_id FROM channels_films WHERE active = true');
   return res.rows.map(r => r.channel_id);
 }
 
@@ -22,29 +37,21 @@ async function sendFilmToChannels(row) {
     try {
       if (row.type === 'text') {
         await bot.sendMessage(channelId, row.content);
+      } else if (row.type === 'video') {
+        const url = await getSignedUrl(row.file_path);
+        if (!url) {
+          console.error(`❌ Film error (${channelId}) : fichier non trouvé -> ${row.file_path}`);
+          continue;
+        }
+        await bot.sendVideo(channelId, url, { caption: row.caption || '', supports_streaming: true });
       }
-
-      if (row.type === 'video') {
-        const { data } = await supabase.storage
-          .from('media')
-          .createSignedUrl(row.file_path, 300);
-
-        await bot.sendVideo(channelId, data.signedUrl, {
-          caption: row.caption || '',
-          supports_streaming: true
-        });
-      }
-
       console.log(`🎬 Film envoyé → ${channelId}`);
     } catch (err) {
       console.error(`❌ Film error (${channelId})`, err.message);
     }
   }
 
-  await pool.query(
-    'UPDATE scheduled_films SET sent = true WHERE id = $1',
-    [row.id]
-  );
+  await pool.query('UPDATE scheduled_films SET sent = true WHERE id = $1', [row.id]);
 }
 
 async function autoSendFilms() {
@@ -59,12 +66,9 @@ async function autoSendFilms() {
   }
 }
 
-/* ================= 📚 MANGAS ================= */
-
+// ================= 📚 MANGAS =================
 async function getMangaChannels() {
-  const res = await pool.query(
-    'SELECT channel_id FROM channels_mangas WHERE active = true'
-  );
+  const res = await pool.query('SELECT channel_id FROM channels_mangas WHERE active = true');
   return res.rows.map(r => r.channel_id);
 }
 
@@ -76,36 +80,22 @@ async function sendMangaToChannels(row) {
     try {
       if (row.type === 'text') {
         await bot.sendMessage(channelId, row.content);
-      }
-
-      if (row.type === 'photo' || row.type === 'video') {
-        const { data } = await supabase.storage
-          .from('media')
-          .createSignedUrl(row.file_path, 300);
-
-        if (row.type === 'photo') {
-          await bot.sendPhoto(channelId, data.signedUrl, {
-            caption: row.caption || ''
-          });
+      } else if (row.type === 'photo' || row.type === 'video') {
+        const url = await getSignedUrl(row.file_path);
+        if (!url) {
+          console.error(`❌ Manga error (${channelId}) : fichier non trouvé -> ${row.file_path}`);
+          continue;
         }
-
-        if (row.type === 'video') {
-          await bot.sendVideo(channelId, data.signedUrl, {
-            caption: row.caption || ''
-          });
-        }
+        if (row.type === 'photo') await bot.sendPhoto(channelId, url, { caption: row.caption || '' });
+        if (row.type === 'video') await bot.sendVideo(channelId, url, { caption: row.caption || '' });
       }
-
       console.log(`📚 Manga envoyé → ${channelId}`);
     } catch (err) {
       console.error(`❌ Manga error (${channelId})`, err.message);
     }
   }
 
-  await pool.query(
-    'UPDATE scheduled_mangas SET sent = true WHERE id = $1',
-    [row.id]
-  );
+  await pool.query('UPDATE scheduled_mangas SET sent = true WHERE id = $1', [row.id]);
 }
 
 async function autoSendMangas() {
@@ -120,8 +110,7 @@ async function autoSendMangas() {
   }
 }
 
-/* ================= ⏰ LOOP GLOBAL ================= */
-
+// ================= ⏰ LOOP GLOBAL =================
 setInterval(async () => {
   try {
     await autoSendFilms();

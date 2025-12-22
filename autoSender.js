@@ -1,7 +1,9 @@
 // autoSend.js
 require('dotenv').config();
-const { pool } = require('./db'); // <- Assure-toi que le chemin est correct
+const { pool } = require('./db'); 
 const bot = require('./bot');
+const supabase = require('./supabase'); 
+
 
 /* ================= 🎬 FILMS ================= */
 

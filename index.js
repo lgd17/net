@@ -20,23 +20,28 @@ const sessions = {}
 /* ================= /addmangachannel ================= */
 
 
-
-// ---------- UTILITAIRES ----------
+/* ---------- UTILITAIRES ---------- */
 function getSummary(session) {
   return `
-📋 Récapitulatif :
-Type : ${session.target.toUpperCase()}
-Date : ${session.date}
-Heure : ${session.time}
-Contenu : ${session.type.toUpperCase()}
-${session.type === 'text' ? `Texte : ${session.content}` : `Fichier : ${session.file_id || 'Pas de fichier'}`}
-Caption : ${session.caption || 'Aucune'}
+📋 *Récapitulatif*
+
+🎯 Type : *${session.target.toUpperCase()}*
+📅 Date : *${session.date}*
+⏰ Heure : *${session.time}*
+📦 Contenu : *${session.type.toUpperCase()}*
+
+${session.type === 'text'
+  ? `✏️ Texte : ${session.content}`
+  : `📎 Fichier : ${session.file_id || 'Aucun'}`}
+
+📝 Caption : ${session.caption || 'Aucune'}
 `;
 }
 
 async function showSummary(session, chatId) {
-  const summary = getSummary(session);
-  bot.sendMessage(chatId, summary, {
+  session.step = 'summary';
+  await bot.sendMessage(chatId, getSummary(session), {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [
@@ -46,15 +51,15 @@ async function showSummary(session, chatId) {
       ]
     }
   });
-  session.step = 'summary';
 }
 
-// ---------- START WIZARD ----------
+/* ---------- START WIZARD ---------- */
 bot.onText(/\/schedule/, (msg) => {
   if (msg.from.id !== ADMIN_ID) return;
 
   sessions[msg.chat.id] = { step: 1 };
-  bot.sendMessage(msg.chat.id, 'Que veux-tu programmer ?', {
+
+  bot.sendMessage(msg.chat.id, '📌 Que veux-tu programmer ?', {
     reply_markup: {
       inline_keyboard: [
         [{ text: '🎬 Film', callback_data: 'target_film' }],
@@ -64,138 +69,150 @@ bot.onText(/\/schedule/, (msg) => {
   });
 });
 
-// ---------- HANDLE INLINE BUTTONS ----------
-bot.on('callback_query', async (callbackQuery) => {
-  const chatId = callbackQuery.message.chat.id;
-  const data = callbackQuery.data;
+/* ---------- INLINE BUTTONS ---------- */
+bot.on('callback_query', async (q) => {
+  const chatId = q.message.chat.id;
+  const data = q.data;
   const session = sessions[chatId];
-  if (!session) return bot.answerCallbackQuery(callbackQuery.id);
+  if (!session) return bot.answerCallbackQuery(q.id);
 
-  // STEP 1 : Film / Manga
+  /* STEP 1 */
   if (session.step === 1 && data.startsWith('target_')) {
     session.target = data.split('_')[1];
     session.step = 2;
-    bot.sendMessage(chatId, 'Entre la date\nFormat : YYYY-MM-DD\nExemple : 2025-12-25');
-    return bot.answerCallbackQuery(callbackQuery.id);
+    await bot.sendMessage(chatId, '📅 Date ?\nFormat : YYYY-MM-DD');
+    return bot.answerCallbackQuery(q.id);
   }
 
-  // STEP 4 : Type contenu
+  /* STEP 4 */
   if (session.step === 4 && data.startsWith('type_')) {
-    const t = data.split('_')[1];
-    if (t === 'skip' || t === 'text') {
-      session.type = 'text';
+    const type = data.split('_')[1];
+    session.type = type === 'skip' ? 'text' : type;
+
+    if (session.type === 'text') {
       session.step = 5;
-      bot.sendMessage(chatId, 'Entre le texte à envoyer');
+      await bot.sendMessage(chatId, '✏️ Entre le texte');
     } else {
-      session.type = t;
       session.step = 6;
-      bot.sendMessage(chatId, 'Envoie maintenant le média');
+      await bot.sendMessage(chatId, '📎 Envoie le média');
     }
-    return bot.answerCallbackQuery(callbackQuery.id);
+    return bot.answerCallbackQuery(q.id);
   }
 
-  // STEP 7 : Caption
+  /* STEP 7 */
   if (session.step === 7) {
     if (data === 'caption_skip') {
       session.caption = null;
       await showSummary(session, chatId);
-      return bot.answerCallbackQuery(callbackQuery.id);
     }
     if (data === 'caption_add') {
-      session.step = 8; // étape 8 = saisie texte caption
-      bot.sendMessage(chatId, 'Entre le texte de la légende');
-      return bot.answerCallbackQuery(callbackQuery.id);
+      session.step = 8;
+      await bot.sendMessage(chatId, '📝 Entre la légende');
     }
+    return bot.answerCallbackQuery(q.id);
   }
 
-  // STEP SUMMARY : Enregistrer ou Annuler
+  /* SUMMARY */
   if (session.step === 'summary') {
     if (data === 'summary_save') {
       await saveSchedule(session, chatId);
       delete sessions[chatId];
-      return bot.answerCallbackQuery(callbackQuery.id, { text: '✅ Contenu enregistré !' });
+      return bot.answerCallbackQuery(q.id, { text: '✅ Enregistré' });
     }
+
     if (data === 'summary_cancel') {
       delete sessions[chatId];
-      return bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Contenu annulé !' });
+      return bot.answerCallbackQuery(q.id, { text: '❌ Annulé' });
     }
   }
 });
 
-// ---------- HANDLE TEXT / MEDIA MESSAGES ----------
+/* ---------- TEXT & MEDIA ---------- */
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const session = sessions[chatId];
-  if (!session || (msg.text && msg.text.startsWith('/'))) return;
+  if (!session || msg.text?.startsWith('/')) return;
 
-  const text = msg.text ? msg.text.trim() : null;
+  const text = msg.text?.trim();
 
-  // STEP 2 : Date
+  /* STEP 2 */
   if (session.step === 2 && text) {
-    const date = dayjs(text, 'YYYY-MM-DD', true);
-    if (!date.isValid()) return bot.sendMessage(chatId, '❌ Date invalide');
+    if (!dayjs(text, 'YYYY-MM-DD', true).isValid())
+      return bot.sendMessage(chatId, '❌ Date invalide');
+
     session.date = text;
     session.step = 3;
-    return bot.sendMessage(chatId, 'Entre l’heure\nFormat : HH:mm\nExemple : 20:30');
+    return bot.sendMessage(chatId, '⏰ Heure ?\nFormat : HH:mm');
   }
 
-  // STEP 3 : Heure
+  /* STEP 3 */
   if (session.step === 3 && text) {
-    const time = dayjs(text, 'HH:mm', true);
-    if (!time.isValid()) return bot.sendMessage(chatId, '❌ Heure invalide');
+    if (!dayjs(text, 'HH:mm', true).isValid())
+      return bot.sendMessage(chatId, '❌ Heure invalide');
+
     session.time = text;
     session.step = 4;
 
-    return bot.sendMessage(chatId, 'Quel type de contenu ?', {
+    return bot.sendMessage(chatId, '📦 Type de contenu ?', {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✏️ text', callback_data: 'type_text' }],
-          [{ text: '🖼️ photo', callback_data: 'type_photo' }],
-          [{ text: '🎥 video', callback_data: 'type_video' }],
-          [{ text: 'Skip (texte seul)', callback_data: 'type_skip' }]
+          [{ text: '✏️ Texte', callback_data: 'type_text' }],
+          [{ text: '🖼️ Photo', callback_data: 'type_photo' }],
+          [{ text: '🎥 Vidéo', callback_data: 'type_video' }],
+          [{ text: 'Skip (texte)', callback_data: 'type_skip' }]
         ]
       }
     });
   }
 
-  // STEP 5 : Texte seul
+  /* STEP 5 */
   if (session.step === 5 && text) {
     session.content = text;
-    await showSummary(session, chatId);
+    return showSummary(session, chatId);
   }
 
-  // STEP 6 : Réception média
+  /* STEP 6 */
   if (session.step === 6) {
-    if ((session.type === 'photo' && msg.photo) || (session.type === 'video' && msg.video)) {
-      session.file_id = session.type === 'photo' ? msg.photo.at(-1).file_id : msg.video.file_id;
-      session.step = 7;
-
-      return bot.sendMessage(chatId, 'Ajouter une légende ?', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: 'Skip', callback_data: 'caption_skip' }],
-            [{ text: 'Ajouter texte', callback_data: 'caption_add' }]
-          ]
-        }
-      });
+    if (session.type === 'photo' && msg.photo) {
+      session.file_id = msg.photo.at(-1).file_id;
+    } else if (session.type === 'video' && msg.video) {
+      session.file_id = msg.video.file_id;
+    } else {
+      return bot.sendMessage(chatId, '❌ Mauvais type de média');
     }
-    return bot.sendMessage(chatId, '❌ Envoie le bon média');
+
+    session.step = 7;
+    return bot.sendMessage(chatId, '📝 Ajouter une légende ?', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Skip', callback_data: 'caption_skip' }],
+          [{ text: 'Ajouter', callback_data: 'caption_add' }]
+        ]
+      }
+    });
   }
 
-  // STEP 8 : Saisie texte caption
+  /* STEP 8 */
   if (session.step === 8 && text) {
     session.caption = text;
-    await showSummary(session, chatId);
+    return showSummary(session, chatId);
   }
 });
 
-// ---------- SAVE FUNCTION ----------
+/* ---------- SAVE ---------- */
 async function saveSchedule(session, chatId) {
-  const table = session.target === 'film' ? 'scheduled_films' : 'scheduled_mangas';
-  const scheduledAt = dayjs(`${session.date} ${session.time}`, 'YYYY-MM-DD HH:mm').toISOString();
+  const table = session.target === 'film'
+    ? 'scheduled_films'
+    : 'scheduled_mangas';
+
+  const scheduledAt = dayjs(
+    `${session.date} ${session.time}`,
+    'YYYY-MM-DD HH:mm'
+  ).toISOString();
 
   await pool.query(
-    `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)
+    `INSERT INTO ${table}
+     (type, content, file_path, caption, scheduled_at)
      VALUES ($1,$2,$3,$4,$5)`,
     [
       session.type,
@@ -206,9 +223,10 @@ async function saveSchedule(session, chatId) {
     ]
   );
 
-  bot.sendMessage(chatId, '✅ Contenu programmé avec succès !');
-  console.log(`📅 ${session.target} programmé pour ${scheduledAt}`);
+  bot.sendMessage(chatId, '✅ Programmation enregistrée');
+  console.log(`📅 ${session.target} programmé → ${scheduledAt}`);
 }
+
 
 /* ================= /addmangachannel ================= */
 

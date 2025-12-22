@@ -212,39 +212,43 @@ async function saveSchedule(session, chatId) {
 
 /* ================= /addmangachannel ================= */
 
-bot.onText(/\/addfilmchannel (.+)/, async (msg, match) => {
-  const userId = msg.from.id;
-  const channelId = match[1].trim();
+bot.onText(
+  /^\/addfilmchannel(?:@\w+)?\s+(.+)/,
+  async (msg, match) => {
+    const userId = msg.from.id;
+    const channelId = match[1].trim();
 
-  // 🔐 Sécurité : admin only
-  if (userId !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, '⛔ Commande réservée à l’admin');
+    // 🔐 Admin only
+    if (userId !== ADMIN_ID) {
+      return bot.sendMessage(msg.chat.id, '⛔ Commande réservée à l’admin');
+    }
+
+    // 🧪 Validation
+    if (!channelId.startsWith('@')) {
+      return bot.sendMessage(
+        msg.chat.id,
+        '❌ Format invalide\nExemple : /addfilmchannel @canal_films'
+      );
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO channels_films (channel_id)
+         VALUES ($1)
+         ON CONFLICT DO NOTHING`,
+        [channelId]
+      );
+
+      bot.sendMessage(
+        msg.chat.id,
+        `✅ Canal FILMS ajouté avec succès : ${channelId}`
+      );
+    } catch (err) {
+      console.error('❌ addfilmchannel error:', err);
+      bot.sendMessage(msg.chat.id, '❌ Erreur base de données');
+    }
   }
-
-  // 🧪 Validation simple
-  if (!channelId.startsWith('@')) {
-    return bot.sendMessage(msg.chat.id, '❌ Format invalide. Exemple : /addfilmchannel @canal_films');
-  }
-
-  try {
-    await pool.query(
-      `INSERT INTO channels_films (channel_id)
-       VALUES ($1)
-       ON CONFLICT (channel_id) DO NOTHING`,
-      [channelId]
-    );
-
-    await bot.sendMessage(
-      msg.chat.id,
-      `✅ Canal ajouté avec succès : ${channelId}`
-    );
-
-    console.log('➕ Nouveau canal FILMS:', channelId);
-  } catch (err) {
-    console.error('❌ addfilmchannel error:', err.message);
-    bot.sendMessage(msg.chat.id, '❌ Erreur lors de l’ajout du canal');
-  }
-});
+);
 
 /* ================= removefilmchannel @canal_films ================= */
 
@@ -280,42 +284,43 @@ bot.onText(/\/listfilmchannels/, async (msg) => {
 
 /* ================= /addmangachannel ================= */
 
-bot.onText(/\/addmangachannel (.+)/, async (msg, match) => {
-  const userId = msg.from.id;
-  const channelId = match[1].trim();
-  
-  // 🔐 Admin only
-  if (userId !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, '⛔ Commande réservée à l’admin');
+bot.onText(
+  /^\/addmangachannel(?:@\w+)?\s+(.+)/,
+  async (msg, match) => {
+    const userId = msg.from.id;
+    const channelId = match[1].trim();
+
+    // 🔐 Admin only
+    if (userId !== ADMIN_ID) {
+      return bot.sendMessage(msg.chat.id, '⛔ Commande réservée à l’admin');
+    }
+
+    // 🧪 Validation
+    if (!channelId.startsWith('@')) {
+      return bot.sendMessage(
+        msg.chat.id,
+        '❌ Format invalide\nExemple : /addmangachannel @canal_mangas'
+      );
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO channels_mangas (channel_id)
+         VALUES ($1)
+         ON CONFLICT DO NOTHING`,
+        [channelId]
+      );
+
+      bot.sendMessage(
+        msg.chat.id,
+        `✅ Canal MANGAS ajouté avec succès : ${channelId}`
+      );
+    } catch (err) {
+      console.error('❌ addmangachannel error:', err);
+      bot.sendMessage(msg.chat.id, '❌ Erreur base de données');
+    }
   }
-
-  // 🧪 Validation
-  if (!channelId.startsWith('@')) {
-    return bot.sendMessage(
-      msg.chat.id,
-      '❌ Format invalide.\nExemple : /addmangachannel @canal_mangas'
-    );
-  }
-
-  try {
-    await pool.query(
-      `INSERT INTO channels_mangas (channel_id)
-       VALUES ($1)
-       ON CONFLICT (channel_id) DO NOTHING`,
-      [channelId]
-    );
-
-    bot.sendMessage(
-      msg.chat.id,
-      `✅ Canal MANGAS ajouté avec succès : ${channelId}`
-    );
-
-    console.log('➕ Nouveau canal MANGAS:', channelId);
-  } catch (err) {
-    console.error('❌ addmangachannel error:', err.message);
-    bot.sendMessage(msg.chat.id, '❌ Erreur lors de l’ajout du canal mangas');
-  }
-});
+);
 
 /* ================= removemangachannel @canal_mangas ================= */
 

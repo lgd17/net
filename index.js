@@ -7,7 +7,13 @@ const dayjs = require('dayjs');
 const customParse = require('dayjs/plugin/customParseFormat');
 dayjs.extend(customParse);
 const { pool } = require('./db');
+const { cleanupOldContent } = require("./cleanupOldScheduledContent");
 
+// 🕛 Tous les jours à 00:00 (heure serveur Render = UTC)
+cron.schedule("0 0 * * *", async () => {
+  console.log("⏰ Cron nettoyage quotidien déclenché (00:00)");
+  await cleanupOldContent();
+});
 
 
 // ====== CONFIGURATION ENV ======

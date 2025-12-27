@@ -6,7 +6,7 @@ const bot = require("./bot");
 
 const ADMIN_ID = process.env.ADMIN_ID;
 
-const URL = process.env.PING_URL || "https://onexboom-bot.onrender.com/ping";
+const URL = process.env.PING_URL || "https://botnet-58y6.onrender.com/ping";
 
 // 1️⃣ Ping principal
 async function ping() {

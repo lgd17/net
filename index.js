@@ -47,6 +47,9 @@ async function safeSend(chatId, text, options = {}) {
 /* ======================================================
    UTILITAIRES
 ====================================================== */
+/* ======================================================
+   UTILITAIRES
+====================================================== */
 function getSummary(session) {
   return `
 📋 *Récapitulatif*
@@ -99,14 +102,14 @@ bot.on("callback_query", async (q) => {
     await bot.answerCallbackQuery(q.id);
     if (!session) return;
 
-    /* STEP 1 : Choix target */
+    // STEP 1 : Choix target
     if (session.step === 1 && data.startsWith("target_")) {
       session.target = data.split("_")[1];
       session.step = 2;
       return safeSend(chatId, "📅 Date ?\nFormat : YYYY-MM-DD");
     }
 
-    /* STEP 4 : Type de contenu */
+    // STEP 4 : Type de contenu
     if (session.step === 4 && data.startsWith("type_")) {
       const type = data.split("_")[1];
       session.type = type === "skip" ? "text" : type;
@@ -115,11 +118,11 @@ bot.on("callback_query", async (q) => {
         return safeSend(chatId, "✏️ Entre le texte");
       } else {
         session.step = 6;
-        return safeSend(chatId, "📎 Envoie le média (photo, vidéo ou document)");
+        return safeSend(chatId, "📎 Envoie le média (photo, vidéo ou document) ou un lien direct");
       }
     }
 
-    /* STEP 7 : Caption */
+    // STEP 7 : Caption
     if (session.step === 7) {
       if (data === "caption_skip") {
         session.caption = null;
@@ -131,7 +134,7 @@ bot.on("callback_query", async (q) => {
       }
     }
 
-    /* STEP SUMMARY */
+    // STEP SUMMARY
     if (session.step === "summary") {
       if (data === "summary_save") {
         await saveSchedule(session, chatId);
@@ -156,7 +159,7 @@ bot.on("message", async (msg) => {
   const text = msg.text?.trim();
 
   try {
-    /* STEP 2 : Date */
+    // STEP 2 : Date
     if (session.step === 2 && text) {
       if (!dayjs(text, "YYYY-MM-DD", true).isValid()) return safeSend(chatId, "❌ Date invalide");
       session.date = text;
@@ -164,7 +167,7 @@ bot.on("message", async (msg) => {
       return safeSend(chatId, "⏰ Heure ?\nFormat : HH:mm");
     }
 
-    /* STEP 3 : Heure */
+    // STEP 3 : Heure
     if (session.step === 3 && text) {
       if (!dayjs(text, "HH:mm", true).isValid()) return safeSend(chatId, "❌ Heure invalide");
       session.time = text;
@@ -182,25 +185,30 @@ bot.on("message", async (msg) => {
       });
     }
 
-    /* STEP 5 : Texte */
+    // STEP 5 : Texte
     if (session.step === 5 && text) {
       session.content = text;
       return showSummary(session, chatId);
     }
 
-    /* STEP 6 : Média */
+    // STEP 6 : Média
     if (session.step === 6) {
       let fileId = null;
       let mediaType = null;
       let fileUrl = null;
 
-      // PHOTO
-      if (session.type === "photo" && msg.photo) {
+      // 1️⃣ Lien direct
+      if (text && text.startsWith("http")) {
+        fileUrl = text;
+        mediaType = "url";
+      }
+      // 2️⃣ Photo
+      else if (session.type === "photo" && msg.photo) {
         fileId = msg.photo.at(-1).file_id;
         mediaType = "photo";
         fileUrl = fileId;
       }
-      // VIDEO
+      // 3️⃣ Vidéo
       else if (session.type === "video" && msg.video) {
         fileId = msg.video.file_id;
         mediaType = "video";
@@ -217,7 +225,7 @@ bot.on("message", async (msg) => {
         const { publicURL } = supabase.storage.from("videos").getPublicUrl(fileName);
         fileUrl = publicURL;
       }
-      // DOCUMENT
+      // 4️⃣ Document
       else if (session.type === "document" && msg.document) {
         fileId = msg.document.file_id;
         mediaType = "document";
@@ -234,14 +242,15 @@ bot.on("message", async (msg) => {
         const { publicURL } = supabase.storage.from("documents").getPublicUrl(fileName);
         fileUrl = publicURL;
       }
-      // TYPE NON VALIDE
+      // 5️⃣ Skip
       else if (text === "/skip") {
         fileId = null;
         mediaType = null;
         fileUrl = null;
       }
+      // 6️⃣ Type invalide
       else {
-        return safeSend(chatId, "⚠️ Envoie un média valide ou tape /skip.");
+        return safeSend(chatId, "⚠️ Envoie un média valide, un document ou un lien direct.");
       }
 
       session.file_id = fileId;
@@ -259,7 +268,7 @@ bot.on("message", async (msg) => {
       });
     }
 
-    /* STEP 8 : Caption */
+    // STEP 8 : Caption
     if (session.step === 8 && text) {
       session.caption = text;
       return showSummary(session, chatId);
@@ -274,8 +283,7 @@ bot.on("message", async (msg) => {
 async function saveSchedule(session, chatId) {
   try {
     const table = session.target === "film" ? "scheduled_films" : "scheduled_mangas";
-   const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm").toISOString();
-
+    const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm`).toISOString();
 
     await pool.query(
       `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)
@@ -296,7 +304,6 @@ async function saveSchedule(session, chatId) {
     await safeSend(chatId, "❌ Erreur lors de l'enregistrement");
   }
 }
-
 
 /* ================= /addmangachannel ================= */
 

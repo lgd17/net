@@ -9,6 +9,7 @@ dayjs.extend(customParse);
 const { pool } = require('./db');
 const cron = require("node-cron");
 const { cleanupOldContent } = require("./cleanupOldScheduledContent");
+const { createClient } = require("@supabase/supabase-js");
 
 // 🕛 Tous les jours à 00:00 (heure serveur Render = UTC)
 cron.schedule("0 0 * * *", async () => {
@@ -20,14 +21,11 @@ cron.schedule("0 0 * * *", async () => {
 // ====== CONFIGURATION ENV ======
 const PORT = process.env.PORT || 3000;
 const ADMIN_ID = Number(process.env.ADMIN_ID);
-const sessions = {}
-
-
-
-/* ================= CONFIG ================= */
-const dayjs = require("dayjs");
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const sessions = {};
-const ADMIN_ID = Number(process.env.ADMIN_ID);
+
+
+
 
 /* ======================================================
    🛡️ ANTI-CRASH GLOBAL (OBLIGATOIRE)
@@ -64,158 +62,126 @@ function getSummary(session) {
 📦 Contenu : *${session.type.toUpperCase()}*
 
 ${session.type === "text"
-  ? `✏️ Texte : ${session.content}`
-  : `📎 Fichier : ${session.file_id || "Aucun"}`}
+    ? `✏️ Texte : ${session.content}`
+    : `📎 Fichier : ${session.file_url || "Aucun"}`}
 
 📝 Légende : ${session.caption || "Aucune"}
 `;
 }
 
 async function showSummary(session, chatId) {
-  try {
-    session.step = "summary";
-
-    await safeSend(chatId, getSummary(session), {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "✅ Enregistrer", callback_data: "summary_save" },
-            { text: "❌ Annuler", callback_data: "summary_cancel" }
-          ]
-        ]
-      }
-    });
-  } catch (err) {
-    console.error("❌ showSummary error:", err);
-  }
+  session.step = "summary";
+  await safeSend(chatId, getSummary(session), {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✅ Enregistrer", callback_data: "summary_save" }],
+        [{ text: "❌ Annuler", callback_data: "summary_cancel" }]
+      ]
+    }
+  });
 }
 
-/* ======================================================
-   START
-====================================================== */
+/* ================= START ================= */
 bot.onText(/\/schedule/, async (msg) => {
-  try {
-    if (msg.from.id !== ADMIN_ID) return;
+  if (msg.from.id !== ADMIN_ID) return;
+  sessions[msg.chat.id] = { step: 1 };
 
-    sessions[msg.chat.id] = { step: 1 };
-
-    await safeSend(msg.chat.id, "📌 Que veux-tu programmer ?", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🎬 Film", callback_data: "target_film" }],
-          [{ text: "📚 Manga", callback_data: "target_manga" }]
-        ]
-      }
-    });
-  } catch (err) {
-    console.error("❌ /schedule error:", err);
-  }
+  await safeSend(msg.chat.id, "📌 Que veux-tu programmer ?", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🎬 Film", callback_data: "target_film" }],
+        [{ text: "📚 Manga", callback_data: "target_manga" }]
+      ]
+    }
+  });
 });
 
-/* ======================================================
-   CALLBACK QUERY (ANTI 400 / ANTI CRASH)
-====================================================== */
+/* ================= CALLBACK QUERY ================= */
 bot.on("callback_query", async (q) => {
   try {
     const chatId = q.message.chat.id;
     const data = q.data;
     const session = sessions[chatId];
-
-    // ✅ TOUJOURS répondre immédiatement
     await bot.answerCallbackQuery(q.id);
 
     if (!session) return;
 
-    /* STEP 1 */
+    /* STEP 1 : Choix target */
     if (session.step === 1 && data.startsWith("target_")) {
       session.target = data.split("_")[1];
       session.step = 2;
-      await safeSend(chatId, "📅 Date ?\nFormat : YYYY-MM-DD");
-      return;
+      return safeSend(chatId, "📅 Date ?\nFormat : YYYY-MM-DD");
     }
 
-    /* STEP 4 */
+    /* STEP 4 : Type de contenu */
     if (session.step === 4 && data.startsWith("type_")) {
       const type = data.split("_")[1];
       session.type = type === "skip" ? "text" : type;
-
       if (session.type === "text") {
         session.step = 5;
-        await safeSend(chatId, "✏️ Entre le texte");
+        return safeSend(chatId, "✏️ Entre le texte");
       } else {
         session.step = 6;
-        await safeSend(chatId, "📎 Envoie le média");
+        return safeSend(chatId, "📎 Envoie le média (photo ou vidéo)");
       }
-      return;
     }
 
-    /* STEP 7 */
+    /* STEP 7 : Caption */
     if (session.step === 7) {
       if (data === "caption_skip") {
         session.caption = null;
-        await showSummary(session, chatId);
-        return;
+        return showSummary(session, chatId);
       }
-
       if (data === "caption_add") {
         session.step = 8;
-        await safeSend(chatId, "📝 Entre la légende");
-        return;
+        return safeSend(chatId, "📝 Entre la légende");
       }
     }
 
-    /* SUMMARY */
+    /* STEP SUMMARY */
     if (session.step === "summary") {
       if (data === "summary_save") {
         await saveSchedule(session, chatId);
         delete sessions[chatId];
         return;
       }
-
       if (data === "summary_cancel") {
         delete sessions[chatId];
-        await safeSend(chatId, "❌ Programmation annulée");
-        return;
+        return safeSend(chatId, "❌ Programmation annulée");
       }
     }
-
   } catch (err) {
     console.error("❌ callback_query error:", err);
   }
 });
 
-/* ======================================================
-   MESSAGES (ANTI CRASH)
-====================================================== */
+/* ================= MESSAGES ================= */
 bot.on("message", async (msg) => {
+  const chatId = msg.chat.id;
+  const session = sessions[chatId];
+  if (!session || msg.text?.startsWith("/")) return;
+
+  const text = msg.text?.trim();
+
   try {
-    const chatId = msg.chat.id;
-    const session = sessions[chatId];
-    if (!session || msg.text?.startsWith("/")) return;
-
-    const text = msg.text?.trim();
-
-    /* STEP 2 */
+    /* STEP 2 : Date */
     if (session.step === 2 && text) {
       if (!dayjs(text, "YYYY-MM-DD", true).isValid()) {
         return safeSend(chatId, "❌ Date invalide");
       }
-
       session.date = text;
       session.step = 3;
       return safeSend(chatId, "⏰ Heure ?\nFormat : HH:mm");
     }
 
-    /* STEP 3 */
+    /* STEP 3 : Heure */
     if (session.step === 3 && text) {
       if (!dayjs(text, "HH:mm", true).isValid()) {
         return safeSend(chatId, "❌ Heure invalide");
       }
-
       session.time = text;
       session.step = 4;
-
       return safeSend(chatId, "📦 Type de contenu ?", {
         reply_markup: {
           inline_keyboard: [
@@ -228,57 +194,44 @@ bot.on("message", async (msg) => {
       });
     }
 
-    /* STEP 5 */
+    /* STEP 5 : Texte */
     if (session.step === 5 && text) {
       session.content = text;
       return showSummary(session, chatId);
     }
 
-    /* STEP 6 */
+    /* STEP 6 : Média */
     if (session.step === 6) {
-  if (session.type === "video" && msg.video) {
-    const fileId = msg.video.file_id;
+      if (session.type === "photo" && msg.photo) {
+        session.file_url = msg.photo.at(-1).file_id; // optionnel: tu peux aussi uploader Supabase
+      } else if (session.type === "video" && msg.video) {
+        // Télécharger depuis Telegram et upload Supabase
+        const fileLink = await bot.getFileLink(msg.video.file_id);
+        const videoData = await axios.get(fileLink, { responseType: "arraybuffer" });
+        const fileName = `videos/${msg.video.file_id}.mp4`;
+        const { data, error } = await supabase.storage
+          .from("videos")
+          .upload(fileName, videoData.data, { contentType: "video/mp4", upsert: true });
 
-    // 1️⃣ Récupérer le lien du fichier depuis Telegram
-    const fileLink = await bot.getFileLink(fileId);
+        if (error) return safeSend(chatId, "❌ Erreur upload Supabase: " + error.message);
+        const { publicURL } = supabase.storage.from("videos").getPublicUrl(fileName);
+        session.file_url = publicURL;
+      } else {
+        return safeSend(chatId, "❌ Mauvais type de média");
+      }
 
-    // 2️⃣ Télécharger le fichier en local
-    const videoData = await axios.get(fileLink, { responseType: "arraybuffer" });
-    const fileName = `videos/${fileId}.mp4`; // nom unique
-
-    // 3️⃣ Upload sur Supabase
-    const { data, error } = await supabase.storage
-      .from("videos") // ton bucket
-      .upload(fileName, videoData.data, {
-        cacheControl: "3600",
-        upsert: true,
-        contentType: "video/mp4"
+      session.step = 7;
+      return safeSend(chatId, "📝 Ajouter une légende ?", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Skip", callback_data: "caption_skip" }],
+            [{ text: "Ajouter", callback_data: "caption_add" }]
+          ]
+        }
       });
-
-    if (error) {
-      return safeSend(chatId, "❌ Erreur upload Supabase: " + error.message);
     }
 
-    // 4️⃣ Récupérer l'URL publique
-    const { publicURL } = supabase.storage
-      .from("videos")
-      .getPublicUrl(fileName);
-
-    session.file_url = publicURL; // <- à enregistrer en DB
-    session.step = 7;
-
-    return safeSend(chatId, "📝 Ajouter une légende ?", {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "Skip", callback_data: "caption_skip" }],
-          [{ text: "Ajouter", callback_data: "caption_add" }]
-        ]
-      }
-    });
-  }
-}
-
-    /* STEP 8 */
+    /* STEP 8 : Caption */
     if (session.step === 8 && text) {
       session.caption = text;
       return showSummary(session, chatId);
@@ -289,37 +242,26 @@ bot.on("message", async (msg) => {
   }
 });
 
-/* ======================================================
-   SAVE (ANTI CRASH DB)
-====================================================== */
+/* ================= SAVE ================= */
 async function saveSchedule(session, chatId) {
   try {
-    const table =
-      session.target === "film"
-        ? "scheduled_films"
-        : "scheduled_mangas";
+    const table = session.target === "film" ? "scheduled_films" : "scheduled_mangas";
+    const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm").toISOString();
 
-    const scheduledAt = dayjs(
-      `${session.date} ${session.time}`,
-      "YYYY-MM-DD HH:mm"
-    ).toISOString();
-
-   await pool.query(
-  `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)
-   VALUES ($1,$2,$3,$4,$5)`,
-  [
-    session.type,
-    session.type === "text" ? session.content : null,
-    session.file_url || null, 
-    session.caption || null,
-    scheduledAt
-  ]
-);
-
+    await pool.query(
+      `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [
+        session.type,
+        session.type === "text" ? session.content : null,
+        session.file_url || null,
+        session.caption || null,
+        scheduledAt
+      ]
+    );
 
     await safeSend(chatId, "✅ Programmation enregistrée");
     console.log(`📅 ${session.target} programmé → ${scheduledAt}`);
-
   } catch (err) {
     console.error("🔥 DB SAVE ERROR:", err);
     await safeSend(chatId, "❌ Erreur lors de l'enregistrement");

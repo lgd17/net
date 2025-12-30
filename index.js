@@ -24,10 +24,36 @@ const sessions = {}
 
 
 
-/* ================= /addmangachannel ================= */
+/* ================= CONFIG ================= */
+const dayjs = require("dayjs");
+const sessions = {};
+const ADMIN_ID = Number(process.env.ADMIN_ID);
 
+/* ======================================================
+   🛡️ ANTI-CRASH GLOBAL (OBLIGATOIRE)
+====================================================== */
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ UNHANDLED REJECTION:", reason);
+});
 
-/* ---------- UTILITAIRES ---------- */
+process.on("uncaughtException", (err) => {
+  console.error("🔥 UNCAUGHT EXCEPTION:", err);
+});
+
+/* ======================================================
+   SAFE SEND (ANTI ERREUR TELEGRAM)
+====================================================== */
+async function safeSend(chatId, text, options = {}) {
+  try {
+    return await bot.sendMessage(chatId, text, options);
+  } catch (err) {
+    console.error("⚠️ Telegram error:", err.message);
+  }
+}
+
+/* ======================================================
+   UTILITAIRES
+====================================================== */
 function getSummary(session) {
   return `
 📋 *Récapitulatif*
@@ -37,203 +63,245 @@ function getSummary(session) {
 ⏰ Heure : *${session.time}*
 📦 Contenu : *${session.type.toUpperCase()}*
 
-${session.type === 'text'
+${session.type === "text"
   ? `✏️ Texte : ${session.content}`
-  : `📎 Fichier : ${session.file_id || 'Aucun'}`}
+  : `📎 Fichier : ${session.file_id || "Aucun"}`}
 
-📝 Caption : ${session.caption || 'Aucune'}
+📝 Légende : ${session.caption || "Aucune"}
 `;
 }
 
 async function showSummary(session, chatId) {
-  session.step = 'summary';
-  await bot.sendMessage(chatId, getSummary(session), {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '✅ Enregistrer', callback_data: 'summary_save' },
-          { text: '❌ Annuler', callback_data: 'summary_cancel' }
+  try {
+    session.step = "summary";
+
+    await safeSend(chatId, getSummary(session), {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Enregistrer", callback_data: "summary_save" },
+            { text: "❌ Annuler", callback_data: "summary_cancel" }
+          ]
         ]
-      ]
-    }
-  });
+      }
+    });
+  } catch (err) {
+    console.error("❌ showSummary error:", err);
+  }
 }
 
-/* ---------- START WIZARD ---------- */
-bot.onText(/\/schedule/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) return;
+/* ======================================================
+   START
+====================================================== */
+bot.onText(/\/schedule/, async (msg) => {
+  try {
+    if (msg.from.id !== ADMIN_ID) return;
 
-  sessions[msg.chat.id] = { step: 1 };
+    sessions[msg.chat.id] = { step: 1 };
 
-  bot.sendMessage(msg.chat.id, '📌 Que veux-tu programmer ?', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🎬 Film', callback_data: 'target_film' }],
-        [{ text: '📚 Manga', callback_data: 'target_manga' }]
-      ]
-    }
-  });
-});
-
-/* ---------- INLINE BUTTONS ---------- */
-bot.on('callback_query', async (q) => {
-  const chatId = q.message.chat.id;
-  const data = q.data;
-  const session = sessions[chatId];
-  if (!session) return bot.answerCallbackQuery(q.id);
-
-  /* STEP 1 */
-  if (session.step === 1 && data.startsWith('target_')) {
-    session.target = data.split('_')[1];
-    session.step = 2;
-    await bot.sendMessage(chatId, '📅 Date ?\nFormat : YYYY-MM-DD');
-    return bot.answerCallbackQuery(q.id);
-  }
-
-  /* STEP 4 */
-  if (session.step === 4 && data.startsWith('type_')) {
-    const type = data.split('_')[1];
-    session.type = type === 'skip' ? 'text' : type;
-
-    if (session.type === 'text') {
-      session.step = 5;
-      await bot.sendMessage(chatId, '✏️ Entre le texte');
-    } else {
-      session.step = 6;
-      await bot.sendMessage(chatId, '📎 Envoie le média');
-    }
-    return bot.answerCallbackQuery(q.id);
-  }
-
-  /* STEP 7 */
-  if (session.step === 7) {
-    if (data === 'caption_skip') {
-      session.caption = null;
-      await showSummary(session, chatId);
-    }
-    if (data === 'caption_add') {
-      session.step = 8;
-      await bot.sendMessage(chatId, '📝 Entre la légende');
-    }
-    return bot.answerCallbackQuery(q.id);
-  }
-
-  /* SUMMARY */
-  if (session.step === 'summary') {
-    if (data === 'summary_save') {
-      await saveSchedule(session, chatId);
-      delete sessions[chatId];
-      return bot.answerCallbackQuery(q.id, { text: '✅ Enregistré' });
-    }
-
-    if (data === 'summary_cancel') {
-      delete sessions[chatId];
-      return bot.answerCallbackQuery(q.id, { text: '❌ Annulé' });
-    }
-  }
-});
-
-/* ---------- TEXT & MEDIA ---------- */
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const session = sessions[chatId];
-  if (!session || msg.text?.startsWith('/')) return;
-
-  const text = msg.text?.trim();
-
-  /* STEP 2 */
-  if (session.step === 2 && text) {
-    if (!dayjs(text, 'YYYY-MM-DD', true).isValid())
-      return bot.sendMessage(chatId, '❌ Date invalide');
-
-    session.date = text;
-    session.step = 3;
-    return bot.sendMessage(chatId, '⏰ Heure ?\nFormat : HH:mm');
-  }
-
-  /* STEP 3 */
-  if (session.step === 3 && text) {
-    if (!dayjs(text, 'HH:mm', true).isValid())
-      return bot.sendMessage(chatId, '❌ Heure invalide');
-
-    session.time = text;
-    session.step = 4;
-
-    return bot.sendMessage(chatId, '📦 Type de contenu ?', {
+    await safeSend(msg.chat.id, "📌 Que veux-tu programmer ?", {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✏️ Texte', callback_data: 'type_text' }],
-          [{ text: '🖼️ Photo', callback_data: 'type_photo' }],
-          [{ text: '🎥 Vidéo', callback_data: 'type_video' }],
-          [{ text: 'Skip (texte)', callback_data: 'type_skip' }]
+          [{ text: "🎬 Film", callback_data: "target_film" }],
+          [{ text: "📚 Manga", callback_data: "target_manga" }]
         ]
       }
     });
-  }
-
-  /* STEP 5 */
-  if (session.step === 5 && text) {
-    session.content = text;
-    return showSummary(session, chatId);
-  }
-
-  /* STEP 6 */
-  if (session.step === 6) {
-    if (session.type === 'photo' && msg.photo) {
-      session.file_id = msg.photo.at(-1).file_id;
-    } else if (session.type === 'video' && msg.video) {
-      session.file_id = msg.video.file_id;
-    } else {
-      return bot.sendMessage(chatId, '❌ Mauvais type de média');
-    }
-
-    session.step = 7;
-    return bot.sendMessage(chatId, '📝 Ajouter une légende ?', {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: 'Skip', callback_data: 'caption_skip' }],
-          [{ text: 'Ajouter', callback_data: 'caption_add' }]
-        ]
-      }
-    });
-  }
-
-  /* STEP 8 */
-  if (session.step === 8 && text) {
-    session.caption = text;
-    return showSummary(session, chatId);
+  } catch (err) {
+    console.error("❌ /schedule error:", err);
   }
 });
 
-/* ---------- SAVE ---------- */
+/* ======================================================
+   CALLBACK QUERY (ANTI 400 / ANTI CRASH)
+====================================================== */
+bot.on("callback_query", async (q) => {
+  try {
+    const chatId = q.message.chat.id;
+    const data = q.data;
+    const session = sessions[chatId];
+
+    // ✅ TOUJOURS répondre immédiatement
+    await bot.answerCallbackQuery(q.id);
+
+    if (!session) return;
+
+    /* STEP 1 */
+    if (session.step === 1 && data.startsWith("target_")) {
+      session.target = data.split("_")[1];
+      session.step = 2;
+      await safeSend(chatId, "📅 Date ?\nFormat : YYYY-MM-DD");
+      return;
+    }
+
+    /* STEP 4 */
+    if (session.step === 4 && data.startsWith("type_")) {
+      const type = data.split("_")[1];
+      session.type = type === "skip" ? "text" : type;
+
+      if (session.type === "text") {
+        session.step = 5;
+        await safeSend(chatId, "✏️ Entre le texte");
+      } else {
+        session.step = 6;
+        await safeSend(chatId, "📎 Envoie le média");
+      }
+      return;
+    }
+
+    /* STEP 7 */
+    if (session.step === 7) {
+      if (data === "caption_skip") {
+        session.caption = null;
+        await showSummary(session, chatId);
+        return;
+      }
+
+      if (data === "caption_add") {
+        session.step = 8;
+        await safeSend(chatId, "📝 Entre la légende");
+        return;
+      }
+    }
+
+    /* SUMMARY */
+    if (session.step === "summary") {
+      if (data === "summary_save") {
+        await saveSchedule(session, chatId);
+        delete sessions[chatId];
+        return;
+      }
+
+      if (data === "summary_cancel") {
+        delete sessions[chatId];
+        await safeSend(chatId, "❌ Programmation annulée");
+        return;
+      }
+    }
+
+  } catch (err) {
+    console.error("❌ callback_query error:", err);
+  }
+});
+
+/* ======================================================
+   MESSAGES (ANTI CRASH)
+====================================================== */
+bot.on("message", async (msg) => {
+  try {
+    const chatId = msg.chat.id;
+    const session = sessions[chatId];
+    if (!session || msg.text?.startsWith("/")) return;
+
+    const text = msg.text?.trim();
+
+    /* STEP 2 */
+    if (session.step === 2 && text) {
+      if (!dayjs(text, "YYYY-MM-DD", true).isValid()) {
+        return safeSend(chatId, "❌ Date invalide");
+      }
+
+      session.date = text;
+      session.step = 3;
+      return safeSend(chatId, "⏰ Heure ?\nFormat : HH:mm");
+    }
+
+    /* STEP 3 */
+    if (session.step === 3 && text) {
+      if (!dayjs(text, "HH:mm", true).isValid()) {
+        return safeSend(chatId, "❌ Heure invalide");
+      }
+
+      session.time = text;
+      session.step = 4;
+
+      return safeSend(chatId, "📦 Type de contenu ?", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✏️ Texte", callback_data: "type_text" }],
+            [{ text: "🖼️ Photo", callback_data: "type_photo" }],
+            [{ text: "🎥 Vidéo", callback_data: "type_video" }],
+            [{ text: "Skip (texte)", callback_data: "type_skip" }]
+          ]
+        }
+      });
+    }
+
+    /* STEP 5 */
+    if (session.step === 5 && text) {
+      session.content = text;
+      return showSummary(session, chatId);
+    }
+
+    /* STEP 6 */
+    if (session.step === 6) {
+      if (session.type === "photo" && msg.photo) {
+        session.file_id = msg.photo.at(-1).file_id;
+      } else if (session.type === "video" && msg.video) {
+        session.file_id = msg.video.file_id;
+      } else {
+        return safeSend(chatId, "❌ Mauvais type de média");
+      }
+
+      session.step = 7;
+      return safeSend(chatId, "📝 Ajouter une légende ?", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Skip", callback_data: "caption_skip" }],
+            [{ text: "Ajouter", callback_data: "caption_add" }]
+          ]
+        }
+      });
+    }
+
+    /* STEP 8 */
+    if (session.step === 8 && text) {
+      session.caption = text;
+      return showSummary(session, chatId);
+    }
+
+  } catch (err) {
+    console.error("❌ message handler error:", err);
+  }
+});
+
+/* ======================================================
+   SAVE (ANTI CRASH DB)
+====================================================== */
 async function saveSchedule(session, chatId) {
-  const table = session.target === 'film'
-    ? 'scheduled_films'
-    : 'scheduled_mangas';
+  try {
+    const table =
+      session.target === "film"
+        ? "scheduled_films"
+        : "scheduled_mangas";
 
-  const scheduledAt = dayjs(
-    `${session.date} ${session.time}`,
-    'YYYY-MM-DD HH:mm'
-  ).toISOString();
+    const scheduledAt = dayjs(
+      `${session.date} ${session.time}`,
+      "YYYY-MM-DD HH:mm"
+    ).toISOString();
 
-  await pool.query(
-    `INSERT INTO ${table}
-     (type, content, file_path, caption, scheduled_at)
-     VALUES ($1,$2,$3,$4,$5)`,
-    [
-      session.type,
-      session.type === 'text' ? session.content : null,
-      session.file_id || null,
-      session.caption || null,
-      scheduledAt
-    ]
-  );
+    await pool.query(
+      `INSERT INTO ${table}
+       (type, content, file_path, caption, scheduled_at)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [
+        session.type,
+        session.type === "text" ? session.content : null,
+        session.file_id || null,
+        session.caption || null,
+        scheduledAt
+      ]
+    );
 
-  bot.sendMessage(chatId, '✅ Programmation enregistrée');
-  console.log(`📅 ${session.target} programmé → ${scheduledAt}`);
+    await safeSend(chatId, "✅ Programmation enregistrée");
+    console.log(`📅 ${session.target} programmé → ${scheduledAt}`);
+
+  } catch (err) {
+    console.error("🔥 DB SAVE ERROR:", err);
+    await safeSend(chatId, "❌ Erreur lors de l'enregistrement");
+  }
 }
-
 
 /* ================= /addmangachannel ================= */
 

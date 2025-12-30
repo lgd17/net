@@ -21,7 +21,7 @@ cron.schedule("0 0 * * *", async () => {
 // ====== CONFIGURATION ENV ======
 const PORT = process.env.PORT || 3000;
 const ADMIN_ID = Number(process.env.ADMIN_ID);
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
 const sessions = {};
 
 

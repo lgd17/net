@@ -283,7 +283,7 @@ bot.on("message", async (msg) => {
 async function saveSchedule(session, chatId) {
   try {
     const table = session.target === "film" ? "scheduled_films" : "scheduled_mangas";
-    const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm`).toISOString();
+    const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm").toISOString();
 
     await pool.query(
       `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)

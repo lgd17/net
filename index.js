@@ -236,24 +236,47 @@ bot.on("message", async (msg) => {
 
     /* STEP 6 */
     if (session.step === 6) {
-      if (session.type === "photo" && msg.photo) {
-        session.file_id = msg.photo.at(-1).file_id;
-      } else if (session.type === "video" && msg.video) {
-        session.file_id = msg.video.file_id;
-      } else {
-        return safeSend(chatId, "❌ Mauvais type de média");
-      }
+  if (session.type === "video" && msg.video) {
+    const fileId = msg.video.file_id;
 
-      session.step = 7;
-      return safeSend(chatId, "📝 Ajouter une légende ?", {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "Skip", callback_data: "caption_skip" }],
-            [{ text: "Ajouter", callback_data: "caption_add" }]
-          ]
-        }
+    // 1️⃣ Récupérer le lien du fichier depuis Telegram
+    const fileLink = await bot.getFileLink(fileId);
+
+    // 2️⃣ Télécharger le fichier en local
+    const videoData = await axios.get(fileLink, { responseType: "arraybuffer" });
+    const fileName = `videos/${fileId}.mp4`; // nom unique
+
+    // 3️⃣ Upload sur Supabase
+    const { data, error } = await supabase.storage
+      .from("videos") // ton bucket
+      .upload(fileName, videoData.data, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: "video/mp4"
       });
+
+    if (error) {
+      return safeSend(chatId, "❌ Erreur upload Supabase: " + error.message);
     }
+
+    // 4️⃣ Récupérer l'URL publique
+    const { publicURL } = supabase.storage
+      .from("videos")
+      .getPublicUrl(fileName);
+
+    session.file_url = publicURL; // <- à enregistrer en DB
+    session.step = 7;
+
+    return safeSend(chatId, "📝 Ajouter une légende ?", {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Skip", callback_data: "caption_skip" }],
+          [{ text: "Ajouter", callback_data: "caption_add" }]
+        ]
+      }
+    });
+  }
+}
 
     /* STEP 8 */
     if (session.step === 8 && text) {
@@ -281,18 +304,18 @@ async function saveSchedule(session, chatId) {
       "YYYY-MM-DD HH:mm"
     ).toISOString();
 
-    await pool.query(
-      `INSERT INTO ${table}
-       (type, content, file_path, caption, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [
-        session.type,
-        session.type === "text" ? session.content : null,
-        session.file_id || null,
-        session.caption || null,
-        scheduledAt
-      ]
-    );
+   await pool.query(
+  `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)
+   VALUES ($1,$2,$3,$4,$5)`,
+  [
+    session.type,
+    session.type === "text" ? session.content : null,
+    session.file_url || null, 
+    session.caption || null,
+    scheduledAt
+  ]
+);
+
 
     await safeSend(chatId, "✅ Programmation enregistrée");
     console.log(`📅 ${session.target} programmé → ${scheduledAt}`);

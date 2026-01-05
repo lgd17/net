@@ -192,82 +192,65 @@ bot.on("message", async (msg) => {
       return showSummary(session, chatId);
     }
 
-    // STEP 6 : Média
-    if (session.step === 6) {
-      let fileId = null;
-      let mediaType = null;
-      let fileUrl = null;
+   // STEP 6 : Média (SAFE VERSION)
+if (session.step === 6) {
+  let mediaType = null;
+  let fileUrl = null;
 
-      // 1️⃣ Lien direct
-      if (text && text.startsWith("http")) {
-        fileUrl = text;
-        mediaType = "url";
-      }
-      // 2️⃣ Photo
-      else if (session.type === "photo" && msg.photo) {
-        fileId = msg.photo.at(-1).file_id;
-        mediaType = "photo";
-        fileUrl = fileId;
-      }
-      // 3️⃣ Vidéo
-      else if (session.type === "video" && msg.video) {
-        fileId = msg.video.file_id;
-        mediaType = "video";
+  // 🔗 Lien direct
+  if (text && text.startsWith("http")) {
+    mediaType = session.type;
+    fileUrl = text;
+  }
 
-        const fileLink = await bot.getFileLink(fileId);
-        const videoData = await axios.get(fileLink, { responseType: "arraybuffer" });
-        const fileName = `videos/${fileId}.mp4`;
+  // 🖼️ Photo
+  else if (session.type === "photo" && msg.photo) {
+    const fileId = msg.photo.at(-1).file_id;
+    const link = await bot.getFileLink(fileId);
+    mediaType = "photo";
+    fileUrl = link;
+  }
 
-        const { error } = await supabase.storage
-          .from("videos")
-          .upload(fileName, videoData.data, { contentType: "video/mp4", upsert: true });
+  // 🎥 Vidéo (IMPORTANT : PAS D’UPLOAD)
+  else if (session.type === "video" && msg.video) {
+    const fileId = msg.video.file_id;
+    const link = await bot.getFileLink(fileId);
+    mediaType = "video";
+    fileUrl = link;
+  }
 
-        if (error) return safeSend(chatId, "❌ Erreur upload Supabase: " + error.message);
-        const { publicURL } = supabase.storage.from("videos").getPublicUrl(fileName);
-        fileUrl = publicURL;
-      }
-      // 4️⃣ Document
-      else if (session.type === "document" && msg.document) {
-        fileId = msg.document.file_id;
-        mediaType = "document";
+  // 📄 Document
+  else if (session.type === "document" && msg.document) {
+    const fileId = msg.document.file_id;
+    const link = await bot.getFileLink(fileId);
+    mediaType = "document";
+    fileUrl = link;
+  }
 
-        const fileLink = await bot.getFileLink(fileId);
-        const docData = await axios.get(fileLink, { responseType: "arraybuffer" });
-        const fileName = `documents/${fileId}-${msg.document.file_name}`;
+  // ⏭️ Skip
+  else if (text === "/skip") {
+    mediaType = null;
+    fileUrl = null;
+  }
 
-        const { error } = await supabase.storage
-          .from("documents")
-          .upload(fileName, docData.data, { contentType: msg.document.mime_type, upsert: true });
+  else {
+    return safeSend(chatId, "⚠️ Envoie un média valide ou un lien direct.");
+  }
 
-        if (error) return safeSend(chatId, "❌ Erreur upload Supabase: " + error.message);
-        const { publicURL } = supabase.storage.from("documents").getPublicUrl(fileName);
-        fileUrl = publicURL;
-      }
-      // 5️⃣ Skip
-      else if (text === "/skip") {
-        fileId = null;
-        mediaType = null;
-        fileUrl = null;
-      }
-      // 6️⃣ Type invalide
-      else {
-        return safeSend(chatId, "⚠️ Envoie un média valide, un document ou un lien direct.");
-      }
+  session.file_type = mediaType;
+  session.file_url = fileUrl;
+  session.step = 7;
 
-      session.file_id = fileId;
-      session.file_type = mediaType;
-      session.file_url = fileUrl;
-      session.step = 7;
-
-      return safeSend(chatId, "📝 Ajouter une légende ?", {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "Skip", callback_data: "caption_skip" }],
-            [{ text: "Ajouter", callback_data: "caption_add" }]
-          ]
-        }
-      });
+  return safeSend(chatId, "📝 Ajouter une légende ?", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "Skip", callback_data: "caption_skip" }],
+        [{ text: "Ajouter", callback_data: "caption_add" }]
+      ]
     }
+  });
+}
+
 
     // STEP 8 : Caption
     if (session.step === 8 && text) {
@@ -286,17 +269,19 @@ async function saveSchedule(session, chatId) {
     const table = session.target === "film" ? "scheduled_films" : "scheduled_mangas";
     const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm").toISOString();
 
-    await pool.query(
-      `INSERT INTO ${table} (type, content, file_path, caption, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [
-        session.type,
-        session.type === "text" ? session.content : null,
-        session.file_url || null,
-        session.caption || null,
-        scheduledAt
-      ]
-    );
+   await pool.query(
+  `INSERT INTO ${table}
+   (type, content, media_url, caption, scheduled_at)
+   VALUES ($1,$2,$3,$4,$5)`,
+  [
+    session.type,
+    session.type === "text" ? session.content : null,
+    session.file_url,
+    session.caption,
+    scheduledAt
+  ]
+);
+
 
     await safeSend(chatId, "✅ Programmation enregistrée");
     console.log(`📅 ${session.target} programmé → ${scheduledAt}`);

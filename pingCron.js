@@ -13,7 +13,7 @@ function isWithinPingHours() {
 }
 
 // Job cron toutes les 14 minutes
-schedule.scheduleJob('*/14 * * * *', async () => {
+schedule.scheduleJob('*/1 * * * *', async () => {
   if (!isWithinPingHours()) return;
 
   try {

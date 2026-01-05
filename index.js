@@ -219,53 +219,51 @@ bot.on("message", async (msg) => {
       return showSummary(session, chatId);
     }
 
-   // STEP 6 : Média (SAFE VERSION)
+  // STEP 6 : Média (VERSION FILE_ID)
 if (session.step === 6) {
   let mediaType = null;
-  let fileUrl = null;
+  let fileIdOrUrl = null;
 
   // 🔗 Lien direct
   if (text && text.startsWith("http")) {
     mediaType = session.type;
-    fileUrl = text;
+    fileIdOrUrl = text; // URL directe
   }
 
   // 🖼️ Photo
   else if (session.type === "photo" && msg.photo) {
-    const fileId = msg.photo.at(-1).file_id;
-    const link = await bot.getFileLink(fileId);
+    const fileId = msg.photo.at(-1).file_id; // prend la meilleure résolution
     mediaType = "photo";
-    fileUrl = link;
+    fileIdOrUrl = fileId; // on stocke le file_id
   }
 
-  // 🎥 Vidéo (IMPORTANT : PAS D’UPLOAD)
+  // 🎥 Vidéo
   else if (session.type === "video" && msg.video) {
     const fileId = msg.video.file_id;
-    const link = await bot.getFileLink(fileId);
     mediaType = "video";
-    fileUrl = link;
+    fileIdOrUrl = fileId; // on stocke le file_id
   }
 
   // 📄 Document
   else if (session.type === "document" && msg.document) {
     const fileId = msg.document.file_id;
-    const link = await bot.getFileLink(fileId);
     mediaType = "document";
-    fileUrl = link;
+    fileIdOrUrl = fileId; // on stocke le file_id
   }
 
   // ⏭️ Skip
   else if (text === "/skip") {
     mediaType = null;
-    fileUrl = null;
+    fileIdOrUrl = null;
   }
 
   else {
     return safeSend(chatId, "⚠️ Envoie un média valide ou un lien direct.");
   }
 
+  // Stockage dans la session
   session.file_type = mediaType;
-  session.file_url = fileUrl;
+  session.media_url = fileIdOrUrl; // <- ici on utilise media_url pour le file_id
   session.step = 7;
 
   return safeSend(chatId, "📝 Ajouter une légende ?", {
@@ -277,7 +275,6 @@ if (session.step === 6) {
     }
   });
 }
-
 
     // STEP 8 : Caption
     if (session.step === 8 && text) {

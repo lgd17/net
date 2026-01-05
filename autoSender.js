@@ -1,50 +1,30 @@
-require('dotenv').config();
 const { pool } = require('./db');
 const bot = require('./bot');
 const supabase = require('./supabase');
 const axios = require('axios');
 
-// ================= CONFIG =================
-const USE_PUBLIC_BUCKET = true;
-
-// ================= HELPERS =================
-
-// Détecte un file_id Telegram
+// Détecte si c'est un file_id Telegram
 function isTelegramFileId(value) {
   return typeof value === 'string' && value.startsWith('BA');
 }
 
-// Récupère URL Supabase
+// Récupère URL Supabase si ce n'est pas un file_id Telegram
 async function getMediaUrl(filePath) {
   if (!filePath) return null;
 
+  if (isTelegramFileId(filePath)) return filePath; // file_id → direct
+
   try {
-    if (USE_PUBLIC_BUCKET) {
-      const { data } = supabase.storage.from('media').getPublicUrl(filePath);
-      return data?.publicUrl || null;
-    }
-
-    const { data, error } = await supabase.storage
-      .from('media')
-      .createSignedUrl(filePath, 3600);
-
-    if (error || !data) return null;
-    return data.signedUrl;
+    const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+    return data?.publicUrl || null;
   } catch (err) {
     console.error('❌ getMediaUrl error:', err.message);
     return null;
   }
 }
 
-// Envoi vidéo par stream ou URL directe
+// Envoi vidéo par stream
 async function sendVideoStream(channelId, url, caption) {
-  if (url.startsWith('http')) {
-    // Telegram accepte URL direct
-    await bot.sendVideo(channelId, url, { caption, supports_streaming: true });
-    return;
-  }
-
-  // Sinon téléchargement depuis Supabase et envoi
   const res = await axios({ method: 'get', url, responseType: 'stream' });
   await bot.sendVideo(channelId, res.data, { caption, supports_streaming: true });
 }
@@ -61,133 +41,91 @@ async function canSend(channelId) {
 }
 
 // ================= ENVOI FILMS =================
-async function getFilmChannels() {
-  const res = await pool.query('SELECT channel_id FROM channels_films WHERE active = true');
-  return res.rows.map(r => r.channel_id);
-}
-
 async function sendFilm(row) {
-  const channels = await getFilmChannels();
+  const res = await pool.query('SELECT channel_id FROM channels_films WHERE active = true');
+  const channels = res.rows.map(r => r.channel_id);
   if (!channels.length) return;
 
   for (const channelId of channels) {
     if (!(await canSend(channelId))) continue;
-    let success = false;
 
+    let success = false;
     try {
       if (row.type === 'text') {
         await bot.sendMessage(channelId, row.content);
         success = true;
-      }
+      } else if (row.type === 'video') {
+        const media = await getMediaUrl(row.media_url);
+        if (!media) throw new Error('Fichier introuvable');
 
-      if (row.type === 'photo') {
-        if (isTelegramFileId(row.media_url)) {
-          await bot.sendPhoto(channelId, row.media_url, { caption: row.caption || '' });
-          success = true;
+        if (isTelegramFileId(media)) {
+          await bot.sendVideo(channelId, media, { caption: row.caption || '', supports_streaming: true });
         } else {
-          const url = await getMediaUrl(row.media_url) || row.media_url;
-          await bot.sendPhoto(channelId, url, { caption: row.caption || '' });
-          success = true;
+          await sendVideoStream(channelId, media, row.caption || '');
         }
+        success = true;
       }
-
-      if (row.type === 'video') {
-        if (isTelegramFileId(row.media_url)) {
-          await bot.sendVideo(channelId, row.media_url, { caption: row.caption || '', supports_streaming: true });
-          success = true;
-        } else {
-          const url = await getMediaUrl(row.media_url) || row.media_url;
-          await sendVideoStream(channelId, url, row.caption || '');
-          success = true;
-        }
-      }
-
-      if (row.type === 'document') {
-        if (isTelegramFileId(row.media_url)) {
-          await bot.sendDocument(channelId, row.media_url, { caption: row.caption || '' });
-          success = true;
-        } else {
-          const url = await getMediaUrl(row.media_url) || row.media_url;
-          await bot.sendDocument(channelId, url, { caption: row.caption || '' });
-          success = true;
-        }
-      }
-
-      if (success) console.log(`🎬 Film envoyé → ${channelId}`);
     } catch (err) {
-      console.error(`❌ Film error (${channelId})`, err.message);
+      console.error(`❌ Film error (${channelId}):`, err.message);
     }
 
     if (success) {
       await pool.query('UPDATE scheduled_films SET sent = true WHERE id = $1', [row.id]);
+      console.log(`🎬 Film envoyé → ${channelId}`);
     }
   }
 }
 
-async function autoSendFilms() {
-  const res = await pool.query('SELECT * FROM scheduled_films WHERE sent = false AND scheduled_at <= now()');
-  for (const row of res.rows) await sendFilm(row);
-}
-
 // ================= ENVOI MANGAS =================
-async function getMangaChannels() {
-  const res = await pool.query('SELECT channel_id FROM channels_mangas WHERE active = true');
-  return res.rows.map(r => r.channel_id);
-}
-
 async function sendManga(row) {
-  const channels = await getMangaChannels();
+  const res = await pool.query('SELECT channel_id FROM channels_mangas WHERE active = true');
+  const channels = res.rows.map(r => r.channel_id);
   if (!channels.length) return;
 
   for (const channelId of channels) {
     if (!(await canSend(channelId))) continue;
-    let success = false;
 
+    let success = false;
     try {
       if (row.type === 'text') {
         await bot.sendMessage(channelId, row.content);
         success = true;
-      }
+      } else if (row.type === 'photo' || row.type === 'video') {
+        const media = await getMediaUrl(row.media_url);
+        if (!media) throw new Error('Fichier introuvable');
 
-      if (['photo','video','document'].includes(row.type)) {
-        if (isTelegramFileId(row.media_url)) {
-          if (row.type === 'photo') await bot.sendPhoto(channelId, row.media_url, { caption: row.caption || '' });
-          if (row.type === 'video') await bot.sendVideo(channelId, row.media_url, { caption: row.caption || '', supports_streaming: true });
-          if (row.type === 'document') await bot.sendDocument(channelId, row.media_url, { caption: row.caption || '' });
-          success = true;
-        } else {
-          const url = await getMediaUrl(row.media_url) || row.media_url;
-          if (row.type === 'photo') await bot.sendPhoto(channelId, url, { caption: row.caption || '' });
-          if (row.type === 'video') await sendVideoStream(channelId, url, row.caption || '');
-          if (row.type === 'document') await bot.sendDocument(channelId, url, { caption: row.caption || '' });
-          success = true;
+        if (row.type === 'photo') {
+          if (isTelegramFileId(media)) await bot.sendPhoto(channelId, media, { caption: row.caption || '' });
+          else await bot.sendPhoto(channelId, media, { caption: row.caption || '' });
+        } else { // video
+          if (isTelegramFileId(media)) await bot.sendVideo(channelId, media, { caption: row.caption || '', supports_streaming: true });
+          else await sendVideoStream(channelId, media, row.caption || '');
         }
+        success = true;
       }
-
-      if (success) console.log(`📚 Manga envoyé → ${channelId}`);
     } catch (err) {
-      console.error(`❌ Manga error (${channelId})`, err.message);
+      console.error(`❌ Manga error (${channelId}):`, err.message);
     }
 
     if (success) {
       await pool.query('UPDATE scheduled_mangas SET sent = true WHERE id = $1', [row.id]);
+      console.log(`📚 Manga envoyé → ${channelId}`);
     }
   }
 }
 
-async function autoSendMangas() {
-  const res = await pool.query('SELECT * FROM scheduled_mangas WHERE sent = false AND scheduled_at <= now()');
-  for (const row of res.rows) await sendManga(row);
+// ================= AUTO SEND LOOP =================
+async function autoSend() {
+  try {
+    const films = await pool.query('SELECT * FROM scheduled_films WHERE sent = false AND scheduled_at <= now()');
+    for (const row of films.rows) await sendFilm(row);
+
+    const mangas = await pool.query('SELECT * FROM scheduled_mangas WHERE sent = false AND scheduled_at <= now()');
+    for (const row of mangas.rows) await sendManga(row);
+  } catch (err) {
+    console.error('❌ AutoSend error:', err.message);
+  }
 }
 
-// ================= LOOP GLOBAL =================
-setInterval(async () => {
-  try {
-    await autoSendFilms();
-    await autoSendMangas();
-  } catch (err) {
-    console.error('❌ AutoSender global error:', err.message);
-  }
-}, 30 * 1000);
-
-console.log('🤖 AutoSender FINAL lancé (Films + Mangas)');
+setInterval(autoSend, 30 * 1000);
+console.log('🤖 AutoSender final lancé (Films + Mangas)');

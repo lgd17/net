@@ -48,6 +48,28 @@ async function safeSend(chatId, text, options = {}) {
 /* ======================================================
    UTILITAIRES
 ====================================================== */
+function escapeMarkdown(text = "") {
+  return text
+    .replace(/_/g, "\\_")
+    .replace(/\*/g, "\\*")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/~/g, "\\~")
+    .replace(/`/g, "\\`")
+    .replace(/>/g, "\\>")
+    .replace(/#/g, "\\#")
+    .replace(/\+/g, "\\+")
+    .replace(/-/g, "\\-")
+    .replace(/=/g, "\\=")
+    .replace(/\|/g, "\\|")
+    .replace(/\{/g, "\\{")
+    .replace(/\}/g, "\\}")
+    .replace(/\./g, "\\.")
+    .replace(/!/g, "\\!");
+}
+
 /* ======================================================
    UTILITAIRES
 ====================================================== */
@@ -55,16 +77,21 @@ function getSummary(session) {
   return `
 📋 *Récapitulatif*
 
-🎯 Type : *${session.target.toUpperCase()}*
-📅 Date : *${session.date}*
-⏰ Heure : *${session.time}*
-📦 Contenu : *${session.type.toUpperCase()}*
+🎯 Type : *${escapeMarkdown(session.target.toUpperCase())}*
+📅 Date : *${escapeMarkdown(session.date)}*
+⏰ Heure : *${escapeMarkdown(session.time)}*
+📦 Contenu : *${escapeMarkdown(session.type.toUpperCase())}*
 
-${session.type === "text" ? `✏️ Texte : ${session.content}` : `📎 Fichier : ${session.file_url || "Aucun"}`}
+${
+  session.type === "text"
+    ? `✏️ Texte : ${escapeMarkdown(session.content)}`
+    : `📎 Fichier : ${escapeMarkdown(session.file_url || "Aucun")}`
+}
 
-📝 Légende : ${session.caption || "Aucune"}
+📝 Légende : ${escapeMarkdown(session.caption || "Aucune")}
 `;
 }
+
 
 async function showSummary(session, chatId) {
   session.step = "summary";

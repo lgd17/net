@@ -293,14 +293,14 @@ async function saveSchedule(session, chatId) {
     const table = session.target === "film" ? "scheduled_films" : "scheduled_mangas";
     const scheduledAt = dayjs(`${session.date} ${session.time}`, "YYYY-MM-DD HH:mm").toISOString();
 
-   await pool.query(
+  await pool.query(
   `INSERT INTO ${table}
    (type, content, media_url, caption, scheduled_at)
    VALUES ($1,$2,$3,$4,$5)`,
   [
     session.type,
     session.type === "text" ? session.content : null,
-    session.file_url,
+    session.media_url, // ← ici, media_url = file_id
     session.caption,
     scheduledAt
   ]
